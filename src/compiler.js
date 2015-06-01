@@ -38,7 +38,16 @@ let compiler = {
   step(node) {
 
     if (node[0] && this[node[0]]) {
-      let val = this[node[0]](node);
+      let handler = this[node[0]];
+      let val;
+      if (handler.enter) {
+        val = handler.enter.call(this, node);
+      } else if (typeof handler === 'function') {
+        val = handler.call(this, node);
+      }
+      if (handler.leave) {
+        handler.leave.call(this, node);
+      }
       return val;
     }
   },
@@ -173,31 +182,38 @@ let compiler = {
       return `td.${this.getTdMethodName('get')}(c, ${JSON.stringify(node[1].key)})`;
     }
   },
-  HTML_ELEMENT(node) {
-    let nodeInfo = node[1].tag_info;
-    let nodeContents = node[1].tag_contents;
-    let tdIndex = this.context.tornadoBodiesCurrentIndex;
-    let previousState = this.context.state;
-    this.setHTMLElementState(nodeInfo);
-    let isNamespaceRoot = nodeInfo.attributes.some(attr => attr.attrName === 'xmlns');
-    let namespace = this.context.namespace ? `, '${this.context.namespace}'` : '';
-    this.context.htmlBodies[tdIndex].htmlBodiesIndexes.push(0);
-    let count = ++this.context.htmlBodies[tdIndex].count;
-    this.fragments[tdIndex] += `      var el${count} = td.${this.getTdMethodName('createElement')}('${nodeInfo.key}'${namespace});\n`;
-    this.buildElementAttributes(nodeInfo.key, nodeInfo.attributes);
-    this.walk(nodeContents);
-    this.context.htmlBodies[tdIndex].htmlBodiesIndexes.pop();
-    this.context.htmlBodies[tdIndex].count--;
-    this.context.state = previousState;
-    if (isNamespaceRoot) {
-      this.context.namespace = null;
-    }
-    if (this.context.state === STATES.ESCAPABLE_RAW) {
-      this.fragments[tdIndex] += `      el${this.context.htmlBodies[tdIndex].count}.defaultValue += td.${this.getTdMethodName('nodeToString')}(el${this.context.htmlBodies[tdIndex].count + 1});\n`;
-    } else {
-      this.fragments[tdIndex] += `      ${this.getElContainerName()}.appendChild(el${this.context.htmlBodies[tdIndex].count + 1});\n`;
-    }
-  },
+  HTML_ELEMENT: (function() {
+    let previousState, isNamespaceRoot, tdIndex;
+
+    return {
+      enter(node) {
+        let nodeInfo = node[1].tag_info;
+        // let nodeContents = node[1].tag_contents;
+        tdIndex = this.context.tornadoBodiesCurrentIndex;
+        previousState = this.context.state;
+        this.setHTMLElementState(nodeInfo);
+        isNamespaceRoot = nodeInfo.attributes.some(attr => attr.attrName === 'xmlns');
+        let namespace = this.context.namespace ? `, '${this.context.namespace}'` : '';
+        this.context.htmlBodies[tdIndex].htmlBodiesIndexes.push(0);
+        let count = ++this.context.htmlBodies[tdIndex].count;
+        this.fragments[tdIndex] += `      var el${count} = td.${this.getTdMethodName('createElement')}('${nodeInfo.key}'${namespace});\n`;
+        this.buildElementAttributes(nodeInfo.key, nodeInfo.attributes);
+      },
+      leave(/*node*/) {
+        this.context.htmlBodies[tdIndex].htmlBodiesIndexes.pop();
+        this.context.htmlBodies[tdIndex].count--;
+        this.context.state = previousState;
+        if (isNamespaceRoot) {
+          this.context.namespace = null;
+        }
+        if (this.context.state === STATES.ESCAPABLE_RAW) {
+          this.fragments[tdIndex] += `      el${this.context.htmlBodies[tdIndex].count}.defaultValue += td.${this.getTdMethodName('nodeToString')}(el${this.context.htmlBodies[tdIndex].count + 1});\n`;
+        } else {
+          this.fragments[tdIndex] += `      ${this.getElContainerName()}.appendChild(el${this.context.htmlBodies[tdIndex].count + 1});\n`;
+        }
+      }
+    };
+  }()),
   PLAIN_TEXT(node) {
     let tdIndex = this.context.tornadoBodiesCurrentIndex;
     if (this.context.state === STATES.HTML_ATTRIBUTE) {
